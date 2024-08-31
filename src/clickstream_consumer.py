@@ -2,9 +2,15 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col
 from pyspark.sql.types import StructType, StringType, IntegerType
 
-# Initialize Spark Session
+# Initialize Spark Session with adjusted configurations
 spark = SparkSession.builder \
     .appName("ClickstreamConsumer") \
+    .master("local[*]") \
+    .config("spark.executor.memory", "4g") \
+    .config("spark.driver.memory", "4g") \
+    .config("spark.executor.heartbeatInterval", "60s") \
+    .config("spark.network.timeout", "1200s") \
+    .config("spark.sql.streaming.checkpointLocation", "/tmp/spark_checkpoint") \
     .getOrCreate()
 
 # Kafka Configuration
@@ -25,6 +31,8 @@ df = spark \
     .format("kafka") \
     .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
     .option("subscribe", kafka_topic) \
+    .option("startingOffsets", "earliest") \
+    .option("failOnDataLoss", "false") \
     .load()
 
 # Convert Kafka Value to String and Parse JSON
@@ -35,11 +43,15 @@ clickstream_df = df.selectExpr("CAST(value AS STRING)") \
 # Perform Aggregation (Example: Count Actions)
 action_counts = clickstream_df.groupBy("action").count()
 
-# Write Output to Console (For Development)
+# Output the results to the console
 query = action_counts \
     .writeStream \
     .outputMode("complete") \
     .format("console") \
     .start()
 
-query.awaitTermination()
+try:
+    query.awaitTermination()
+except KeyboardInterrupt:
+    query.stop()
+    spark.stop()
